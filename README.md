@@ -22,8 +22,24 @@ pointed where you look.
 It is a single [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) Lua mod. No pak files, no game files
 replaced; delete one folder to remove it.
 
-<!-- SCREENSHOT: the main "this is what it looks like" shot — a street or combat scene in first person -->
-![First-person view](screenshots/01-first-person.jpg)
+|  Video demonstration |
+| :------------: |
+| [![Video](screenshots/00-video_preview.jpg)](https://www.youtube.com/watch?v=HHdyhu0-VDY)  |
+
+</div>
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" colspan="2"><img src="screenshots/01-first-person.jpg" width="360" alt="First-person view"><br><sub>First-person view</sub></td>
+    <td align="center" colspan="2"><img src="screenshots/02-weapon.jpg" width="360" alt="Action view"><br><sub>Action view</sub></td>
+    <td align="center" colspan="2"><img src="screenshots/03-settings.jpg" width="360" alt="Settings"><br><sub>Settings</sub></td>
+  </tr>
+</table>
+
+</div>
+
 
 ## What the mod adds
 
@@ -53,8 +69,6 @@ replaced; delete one folder to remove it.
 - Optional: a live floor plan under the dots of the game's radar, so you can see walls and passages.
 - An in-game settings menu.
 
-<!-- SCREENSHOT: weapon view model in combat, ideally while firing (laser from the muzzle visible) -->
-![Weapon view model](screenshots/02-weapon.jpg)
 
 **Keys**
 
@@ -103,8 +117,6 @@ Press **F6** in game. Up / Down selects a row, Left / Right changes the value (h
 toggles or resets. To switch tabs, move up onto the tab bar and press Left / Right. Changes apply
 immediately and are saved to `Mods\AscentFPS\AscentFPS.cfg`.
 
-<!-- SCREENSHOT: the F6 settings menu (one tab is enough, or a strip of all three) -->
-![Settings menu](screenshots/03-settings.jpg)
 
 ### Console
 
