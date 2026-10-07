@@ -17,8 +17,23 @@
 Это один Lua-мод для [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS). Никаких pak-файлов, файлы игры не
 заменяются; чтобы убрать мод, достаточно удалить одну папку.
 
-<!-- СКРИНШОТ: главный кадр «как это выглядит» — улица или бой от первого лица -->
-![Вид от первого лица](screenshots/01-first-person.jpg)
+|  Видео демонстрация |
+| :------------: |
+| [![Video](screenshots/00-video_preview.jpg)](https://www.youtube.com/watch?v=HHdyhu0-VDY)  |
+
+</div>
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" colspan="2"><img src="screenshots/01-first-person.jpg" width="360" alt="Вид от первого лица"><br><sub>Вид от первого лица</sub></td>
+    <td align="center" colspan="2"><img src="screenshots/02-weapon.jpg" width="360" alt="Вид во время боя"><br><sub>Вид во время боя</sub></td>
+    <td align="center" colspan="2"><img src="screenshots/03-settings.jpg" width="360" alt="Настройки"><br><sub>Настройки</sub></td>
+  </tr>
+</table>
+
+</div>
 
 ## Что добавляет мод
 
@@ -47,8 +62,6 @@
 - По желанию: живой план местности под точками штатного радара — видно стены и проходы.
 - Внутриигровое меню настроек.
 
-<!-- СКРИНШОТ: оружие в кадре в бою, желательно в момент стрельбы (виден лазер от ствола) -->
-![Оружие в кадре](screenshots/02-weapon.jpg)
 
 **Клавиши**
 
@@ -98,8 +111,6 @@
 строку вкладок и нажмите влево / вправо. Изменения применяются сразу и сохраняются в
 `Mods\AscentFPS\AscentFPS.cfg`.
 
-<!-- СКРИНШОТ: меню настроек по F6 (достаточно одной вкладки или полоски из всех трёх) -->
-![Меню настроек](screenshots/03-settings.jpg)
 
 ### Консоль
 
