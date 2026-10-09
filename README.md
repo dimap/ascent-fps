@@ -74,8 +74,9 @@ replaced; delete one folder to remove it.
 
 | Key | Action |
 |---|---|
-| **F5** | First person on / off (off = the unmodified game) |
+| **F5** | Switch between first person and the original view (the camera flies there) |
 | **F6** | Settings menu |
+| **-** / **+** | Camera further away / closer: from first person (0 %) to the original view (100 %) |
 
 Menus, the journal, vendors, the taxi list, cutscenes and the pause menu get the normal camera and a
 free mouse cursor automatically. Alt-tabbing releases the cursor as well.
@@ -127,6 +128,7 @@ the same as F5.
 | Name | Setting | | Name | Setting |
 |---|---|---|---|---|
 | `sens` | mouse sensitivity | | `weapon` | weapon in view (0/1) |
+| `zoom` | camera distance, % (0 = first person, 100 = original view) | | `wtilt` | weapon tilts with the view (0/1) |
 | `fov` | field of view | | `wsize` | weapon size, % |
 | `eye` | eye height, cm | | `wfwd` | weapon distance from eyes, cm |
 | `bob` | head bob, % | | `wright` | weapon to the right, cm |

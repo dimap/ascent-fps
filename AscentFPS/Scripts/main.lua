@@ -8,7 +8,7 @@ AFPS = AFPS or {}
 local A = AFPS
 A.dir = MOD_DIR
 A.S = A.S or {}            -- all mod state
-A.version = "1.18"
+A.version = "1.23"
 
 local LOG = MOD_DIR .. "AscentFPS.log"
 function A.log(msg)

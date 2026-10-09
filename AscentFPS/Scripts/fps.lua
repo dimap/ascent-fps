@@ -14,7 +14,9 @@ local valid, addr, log = A.valid, A.addr, A.log
 local CFG = A.dir .. "AscentFPS.cfg"
 local DEFAULTS = {
     sens = 0.15, fov = 90.0, eye = 8.0, crosshair = 1,
+    zoom = 0,                                                     -- camera distance: 0 = first person ... 100 = the original game view
     weapon = 1, wsize = 60, wfwd = 44, wright = 16, wdown = 18,   -- weapon view model: scale %, offsets in cm
+    wtilt = 0,                                                    -- 1 = the view model tilts up/down with the view (the game still shoots level)
     laser = 1,                                                    -- the weapon's laser sight (moved to the muzzle)
     recoil = 100,                                                 -- weapon kick per shot in %, 0 = off
     roofs = 1,                                                    -- keep ceilings / roofs that the game fades away indoors
@@ -22,10 +24,10 @@ local DEFAULTS = {
     bob = 100,                                                    -- walking head bob in %, 0 = off
     bloom = 4,                                                    -- bloom intensity in %, below 0 = leave to the game
 }
-local CFG_ORDER = { "sens", "fov", "eye", "crosshair", "weapon", "wsize", "wfwd", "wright", "wdown", "bloom", "bob", "radar", "roofs", "recoil", "laser" }
+local CFG_ORDER = { "sens", "fov", "eye", "crosshair", "weapon", "wsize", "wfwd", "wright", "wdown", "bloom", "bob", "radar", "roofs", "recoil", "laser", "zoom", "wtilt" }
 S.cfg = S.cfg or {}
 for k, v in pairs(DEFAULTS) do if S.cfg[k] == nil then S.cfg[k] = v end end
-if S.on == nil then S.on = true end
+if S.on == nil then S.on = true end          -- false = the original game view (zoom 100 reached), the mod lets go
 S.yaw = S.yaw or 0.0
 S.pitch = S.pitch or 0.0
 S.tickN = S.tickN or 0
@@ -52,7 +54,10 @@ local function saveCfg()
     for _, k in ipairs(CFG_ORDER) do f:write(string.format("%s=%.4f\n", k, S.cfg[k])) end
     f:close()
 end
-if not S.cfgLoaded then loadCfg(); S.cfgLoaded = true end
+if not S.cfgLoaded then
+    loadCfg(); S.cfgLoaded = true
+    if S.cfg.zoom >= 100.0 then S.on = false end
+end
 
 -- ---------------------------------------------------------------- own body / weapon
 -- Actor-level hiding: nothing has to be enumerated (walking component arrays from Lua crashed this
@@ -67,10 +72,15 @@ end
 -- The weapon view model: the carried weapon actor stays attached to the (hidden) hand, but every frame
 -- it is put in front of the camera. Its hand-relative transform is remembered and given back.
 local VM_YAW = -90.0        -- weapon meshes point along +Y
+local DRAW = { time = 0.28, holster = 0.16, down = 22.0, right = 8.0, back = 8.0, arc = 9.0, pitch = 20.0, yaw = -25.0, roll = 50.0 }  -- cm, degrees (roll > 0 = muzzle down)
 
 local function releaseWeapon()
     local k = S.vmW; S.vmW = nil
     if k and valid(k.obj) then pcall(function()
+        if k.meshOff and k.holsterT0 ~= nil then                 -- interrupted while being put away
+            local mesh = k.obj.SkeletalMeshComponent
+            if valid(mesh) then mesh:SetVisibility(false, true) end
+        end
         k.obj:SetActorScale3D(k.scale)
         k.obj:K2_SetActorRelativeLocation(k.loc, false, {}, true)
         k.obj:K2_SetActorRelativeRotation(k.rot, false, {}, true)
@@ -108,26 +118,10 @@ local function recoilStep(pawn, dt)
     return kick
 end
 
--- Every frame: the game hides the weapon actor together with the hidden pawn and shows it again when
--- you fire, so its visibility has to be enforced continuously in both directions.
-local function pinWeapon(pawn, ex, ey, ez)
-    local w = carriedWeapon(pawn)
-    if w == nil or S.cfg.weapon == 0 then
-        if S.vmW then releaseWeapon() end
-        if w ~= nil and w.bHidden ~= true then w:SetActorHiddenInGame(true) end
-        return
-    end
-    if w.bHidden == true then w:SetActorHiddenInGame(false) end
-    local a = addr(w)
-    if S.vmW == nil or S.vmW.a ~= a then
-        releaseWeapon()
-        local root = w.RootComponent
-        if not valid(root) then return end
-        local l, r, sc = root.RelativeLocation, root.RelativeRotation, w:GetActorScale3D()
-        S.vmW = { obj = w, a = a, loc = { X = l.X, Y = l.Y, Z = l.Z }, rot = { Pitch = r.Pitch, Yaw = r.Yaw, Roll = r.Roll },
-                  scale = { X = sc.X, Y = sc.Y, Z = sc.Z } }
-    end
-    local k = S.vmW
+-- Puts the view model in front of the camera. q = 0: the normal carried pose; q = 1: stowed - low on the
+-- right, turned away, muzzle down. The draw runs q from 1 to 0, the holster the same arc from 0 to 1.
+local function placeWeapon(k, ex, ey, ez, q)
+    local w = k.obj
     if k.size ~= S.cfg.wsize then
         k.size = S.cfg.wsize
         local m = k.size / 100.0
@@ -135,15 +129,81 @@ local function pinWeapon(pawn, ex, ey, ez)
     end
     local kick = S.recoil or 0.0                                   -- muzzle up, weapon back
     local fwd, right, up = S.cfg.wfwd - kick * 4.0, S.cfg.wright, -S.cfg.wdown + kick * 1.0
+    local dPitch, dYaw, dRoll = 0.0, 0.0, 0.0
+    if q > 0.0 then
+        local D = DRAW
+        local arc = math.sin(q * math.pi)               -- the bulge of the arc, zero at both ends
+        up = up - q * D.down
+        right = right + q * D.right + arc * D.arc
+        fwd = fwd - q * D.back
+        dPitch, dYaw, dRoll = q * D.pitch, q * D.yaw, q * D.roll
+    end
     local y, p = math.rad(S.yaw), math.rad(S.pitch)
     local cy, sy, cp, sp = math.cos(y), math.sin(y), math.cos(p), math.sin(p)
+    -- The actor is yawed 90 degrees against the view (VM_YAW), so its Roll axis is the view's pitch axis:
+    -- negative Roll lifts the muzzle. (Its Pitch would spin the weapon around the barrel.)
+    -- By default the weapon stays level, because that is how the game shoots: horizontally, whatever the
+    -- view pitch. With "wtilt" it tilts with the view instead (looks better, but then it no longer points
+    -- where the shots go).
+    local tilt = (S.cfg.wtilt ~= 0) and S.pitch or 0.0
     w:K2_SetActorLocationAndRotation({
         X = ex + cp * cy * fwd - sy * right - sp * cy * up,
         Y = ey + cp * sy * fwd + cy * right - sp * sy * up,
         Z = ez + sp * fwd + cp * up,
-    }, { Pitch = S.pitch + kick * 7.0, Yaw = S.yaw + VM_YAW, Roll = 0.0 }, false, {}, true)
+    }, { Pitch = dPitch, Yaw = S.yaw + VM_YAW + dYaw, Roll = -(tilt + kick * 7.0) + dRoll }, false, {}, true)
 end
 
+-- Every frame: the game hides the weapon actor together with the hidden pawn and shows it again when
+-- you fire, so its visibility has to be enforced continuously in both directions.
+local function pinWeapon(pawn, ex, ey, ez)
+    local w = carriedWeapon(pawn)
+    if S.cfg.weapon == 0 then
+        if S.vmW then releaseWeapon() end
+        if w ~= nil and w.bHidden ~= true then w:SetActorHiddenInGame(true) end
+        return
+    end
+    local a = w and addr(w) or nil
+    local k = S.vmW
+    -- the weapon in view is no longer the carried one (swapped, or put away in a safe zone): holster it first
+    if k and k.a ~= a then
+        if not valid(k.obj) then S.vmW = nil; k = nil
+        else
+            if k.holsterT0 == nil then
+                k.holsterT0 = S.wall
+                k.hidAfter = (k.obj.bHidden == true)            -- how the game wants it once it is put away
+            end
+            local q = clamp((S.wall - k.holsterT0) / DRAW.holster, 0.0, 1.0)
+            -- The game puts a weapon away by switching its mesh invisible (SetVisibility), at once. For the
+            -- time of the animation we switch it back on, and off again when the weapon is out of view.
+            local mesh = k.obj.SkeletalMeshComponent
+            if q >= 1.0 then
+                local obj, hid, meshOff = k.obj, k.hidAfter, k.meshOff
+                releaseWeapon(); k = nil
+                if meshOff and valid(mesh) then mesh:SetVisibility(false, true) end
+                if hid and obj.bHidden ~= true then obj:SetActorHiddenInGame(true) end
+            else
+                if valid(mesh) and mesh.bVisible ~= true then k.meshOff = true; mesh:SetVisibility(true, true) end
+                if k.obj.bHidden == true then k.obj:SetActorHiddenInGame(false) end
+                placeWeapon(k, ex, ey, ez, q * q)               -- slow start, quick exit
+                if w ~= nil and w.bHidden ~= true then w:SetActorHiddenInGame(true) end      -- the next weapon waits its turn
+                return
+            end
+        end
+    end
+    if w == nil then return end
+    if w.bHidden == true then w:SetActorHiddenInGame(false) end
+    if k == nil then
+        local root = w.RootComponent
+        if not valid(root) then return end
+        local l, r, sc = root.RelativeLocation, root.RelativeRotation, w:GetActorScale3D()
+        k = { obj = w, a = a, loc = { X = l.X, Y = l.Y, Z = l.Z }, rot = { Pitch = r.Pitch, Yaw = r.Yaw, Roll = r.Roll },
+              scale = { X = sc.X, Y = sc.Y, Z = sc.Z }, drawT0 = S.wall }      -- a new weapon in view: play the draw
+        S.vmW = k
+    end
+    k.holsterT0 = nil
+    local q = 1.0 - clamp((S.wall - (k.drawT0 or -10)) / DRAW.time, 0.0, 1.0)
+    placeWeapon(k, ex, ey, ez, q * q)                           -- fast at first, settling softly
+end
 local function hideBody(pawn, hide)
     if hide then
         if pawn.bHidden ~= true then pawn:SetActorHiddenInGame(true) end
@@ -193,43 +253,68 @@ local function trackLaser(pawn)
     end
 end
 
--- ---------------------------------------------------------------- floating health bars
--- The game places its floating bars with a projection that has no "behind the camera" case (the
--- top-down camera never needed one), so bars of things behind you show up mirrored on screen.
--- Bars register themselves through their Blueprint Construct event; we move the ones behind the view away.
+-- ---------------------------------------------------------------- floating health bars and enemy headers
+-- The game places its floating widgets with a projection that has no "behind the camera" case (the
+-- top-down camera never needed one), so the bars of objects and the headers of enemies (level, elite /
+-- bounty icons, health) that are behind you show up mirrored in front of you.
+-- The widgets register themselves through parameterless Blueprint events - Construct for the bars, Start
+-- for the pooled enemy headers - and the ones whose owner is behind the view are moved off screen.
 local BAR_CONSTRUCT = "/Game/Blueprints/UI/TheAscentHPBarWidget_Normal.TheAscentHPBarWidget_Normal_C:Construct"
+local HEADERS = {       -- widget class, its Start event
+    { "WB_EnemyHeader_C", "/Game/GUI/WB_EnemyHeader.WB_EnemyHeader_C:Start" },
+    { "WB_EnemyHeader_Bounty_C", "/Game/GUI/WB_EnemyHeader_Bounty.WB_EnemyHeader_Bounty_C:Start" },
+    { "WB_EnemyHeader_Boss_C", "/Game/GUI/WB_EnemyHeader_Boss.WB_EnemyHeader_Boss_C:Start" },
+}
+
+local function addBar(w, header)
+    if not (S.bars and valid(w)) then return end
+    local a = addr(w)
+    if a == nil or S.barSeen[a] then return end         -- pooled headers call Start every time they are reused
+    S.barSeen[a] = true
+    S.bars[#S.bars + 1] = { w = w, a = a, header = header, faded = false }
+end
 
 local function trackBars()
     if not S.barHook then
         local ok, e = pcall(function()
-            RegisterHook(BAR_CONSTRUCT, function(Context)
-                pcall(function()
-                    local b = Context:get()
-                    if S.bars and valid(b) then S.bars[#S.bars + 1] = { w = b, faded = false } end
-                end)
-            end)
+            RegisterHook(BAR_CONSTRUCT, function(Context) pcall(function() addBar(Context:get(), false) end) end)
         end)
         S.barHook = true
         log("health-bar hook ok=" .. tostring(ok) .. " " .. tostring(ok and "" or e))
     end
+    S.hdrHook = S.hdrHook or {}
+    for i, h in ipairs(HEADERS) do                       -- a class that is not loaded yet is retried on the next pawn
+        if not S.hdrHook[i] then
+            local ok = pcall(function()
+                RegisterHook(h[2], function(Context) pcall(function() addBar(Context:get(), true) end) end)
+            end)
+            if ok then S.hdrHook[i] = true; log("enemy-header hook " .. h[1] .. " ok") end
+        end
+    end
     if S.bars then return end       -- same world (respawn): the list is still good
-    S.bars = {}
-    local list = FindAllOf("TheAscentHPBarWidget_Normal_C")     -- once: the bars that already exist
-    if list then for _, b in pairs(list) do if valid(b) then S.bars[#S.bars + 1] = { w = b, faded = false } end end end
+    S.bars = {}; S.barSeen = {}
+    -- once per world: the widgets that already exist
+    local list = FindAllOf("TheAscentHPBarWidget_Normal_C")
+    if list then for _, b in pairs(list) do addBar(b, false) end end
+    for _, h in ipairs(HEADERS) do
+        list = FindAllOf(h[1])
+        if list then for _, w in pairs(list) do addBar(w, true) end end
+    end
 end
 
 local function updateBars(ex, ey, ez, restore)
     local bars = S.bars
     if not bars then return end
-    local y, p = math.rad(S.yaw), math.rad(S.pitch)
+    local y, p = math.rad(S.camYaw or S.yaw), math.rad(S.camPitch or S.pitch)
     local fx, fy, fz = math.cos(p) * math.cos(y), math.cos(p) * math.sin(y), math.sin(p)
     for i = #bars, 1, -1 do
         local e = bars[i]
-        if not valid(e.w) then table.remove(bars, i)
+        if not valid(e.w) then S.barSeen[e.a] = nil; table.remove(bars, i)
         else
             local fade = false
             if not restore then
-                local actor = e.w:GetOwningActor()
+                local actor
+                if e.header then actor = e.w.EnemyOwner else actor = e.w:GetOwningActor() end
                 if valid(actor) then
                     local l = actor:K2_GetActorLocation()
                     fade = ((l.X - ex) * fx + (l.Y - ey) * fy + (l.Z - ez) * fz) < 30.0
@@ -255,7 +340,7 @@ local TEXT_HOOKS = {
 }
 
 local function onStatusText(Context)
-    if not (S.active and S.texts and valid(S.pawn)) then return end
+    if not (S.active and S.texts and valid(S.pawn)) or S.third then return end
     local w = Context:get()
     if not valid(w) then return end
     local l, pl = w.ActorLocation, S.pawn:K2_GetActorLocation()
@@ -431,7 +516,7 @@ local function showCrosshair(show)
         S.xhairShown = false
         if (S.xhairFails or 0) < 3 then
             local ok, w = pcall(buildCrosshair)
-            if ok and valid(w) then S.xhair = w else S.xhairFails = (S.xhairFails or 0) + 1; log("crosshair: " .. tostring(w)) end
+            if ok and valid(w) then S.xhair = w; S.xhairTX = nil else S.xhairFails = (S.xhairFails or 0) + 1; log("crosshair: " .. tostring(w)) end
         end
     end
     if valid(S.xhair) and S.xhairShown ~= show then
@@ -470,20 +555,22 @@ local TEXTS = {
         settings = "НАСТРОЙКИ", on = "ВКЛ", off = "ВЫКЛ", gameDefault = "КАК В ИГРЕ", cm = "см", enter = "ENTER",
         hint = "ВВЕРХ / ВНИЗ: ВЫБОР     ВЛЕВО / ВПРАВО: ИЗМЕНИТЬ     F6: ЗАКРЫТЬ",
         tabView = "ОБЗОР", tabWeapon = "ОРУЖИЕ", tabUi = "ИНТЕРФЕЙС",
+        zoom = "Отдаление камеры (+ / -)", firstPerson = "ОТ ПЕРВОГО ЛИЦА",
         sens = "Чувствительность мыши", fov = "Угол обзора", eye = "Высота глаз", bob = "Покачивание при ходьбе",
         bloom = "Свечение эффектов", roofs = "Потолки в помещениях",
         weapon = "Оружие в кадре", wsize = "Размер", wfwd = "Дальше от глаз", wright = "Правее", wdown = "Ниже",
-        recoil = "Отдача", laser = "Лазерный целеуказатель",
+        recoil = "Отдача", laser = "Лазерный целеуказатель", wtilt = "Наклон оружия за взглядом",
         crosshair = "Прицел", radar = "Геометрия на радаре", reset = "Сбросить все настройки",
     },
     en = {
         settings = "SETTINGS", on = "ON", off = "OFF", gameDefault = "GAME DEFAULT", cm = "cm", enter = "ENTER",
         hint = "UP / DOWN: SELECT     LEFT / RIGHT: CHANGE     F6: CLOSE",
         tabView = "VIEW", tabWeapon = "WEAPON", tabUi = "INTERFACE",
+        zoom = "Camera distance (+ / -)", firstPerson = "FIRST PERSON",
         sens = "Mouse sensitivity", fov = "Field of view", eye = "Eye height", bob = "Head bob when walking",
         bloom = "Effect glow (bloom)", roofs = "Ceilings indoors",
         weapon = "Weapon in view", wsize = "Size", wfwd = "Distance from eyes", wright = "To the right", wdown = "Lower",
-        recoil = "Recoil", laser = "Laser sight",
+        recoil = "Recoil", laser = "Laser sight", wtilt = "Weapon tilts with the view",
         crosshair = "Crosshair", radar = "Geometry on the radar", reset = "Reset all settings",
     },
 }
@@ -517,6 +604,7 @@ local MENU = {
     { title = "tabView", items = {
         { key = "sens", step = 0.01, min = 0.02, max = 1.0, fmt = "%.2f" },
         { key = "fov", step = 5, min = 60, max = 120, fmt = "%.0f" },
+        { key = "zoom", step = 5, min = 0, max = 100, fmt = "%.0f", unit = "%", zero = "firstPerson", full = "gameDefault" },
         { key = "eye", step = 2, min = -40, max = 60, fmt = "%+.0f", unit = "cm" },
         { key = "bob", step = 25, min = 0, max = 200, fmt = "%.0f", unit = "%", zero = "off" },
         { key = "bloom", step = 1, min = -1, max = 60, fmt = "%.0f", unit = "%", negative = "gameDefault" },
@@ -528,6 +616,7 @@ local MENU = {
         { key = "wfwd", step = 2, min = 16, max = 100, fmt = "%.0f", unit = "cm" },
         { key = "wright", step = 1, min = -40, max = 40, fmt = "%+.0f", unit = "cm" },
         { key = "wdown", step = 1, min = 0, max = 50, fmt = "%.0f", unit = "cm" },
+        { key = "wtilt", bool = true },
         { key = "recoil", step = 25, min = 0, max = 200, fmt = "%.0f", unit = "%", zero = "off" },
         { key = "laser", bool = true },
     } },
@@ -537,8 +626,8 @@ local MENU = {
         { action = "reset", key = "reset" },
     } },
 }
-local MENU_ROWS = 7
-local MENU_W, MENU_H, ROW_H = 640, 372, 30
+local MENU_ROWS = 8
+local MENU_W, MENU_H, ROW_H = 640, 402, 30
 local MENU_TOP = -MENU_H / 2
 local TAB_Y = MENU_TOP + 62
 local ROW_Y0 = MENU_TOP + 112
@@ -549,6 +638,7 @@ local function menuValue(item, T)
     if item.bool then return (v ~= 0) and T.on or T.off end
     if item.negative and v < 0 then return T[item.negative] end
     if item.zero and v == 0 then return T[item.zero] end
+    if item.full and v >= item.max then return T[item.full] end
     local s = string.format(item.fmt, v)
     if item.unit == "cm" then s = s .. " " .. T.cm elseif item.unit == "%" then s = s .. "%" end
     return "<  " .. s .. "  >"
@@ -834,6 +924,82 @@ local function updateGroupFades(want)
     log("ceilings kept=" .. tostring(want) .. " (" .. n .. " fade groups)")
 end
 
+-- ---------------------------------------------------------------- camera distance (zoom)
+-- "+" / "-" move the camera along the line between the first-person eye and the game's own top-down
+-- camera, which the game still computes every frame: 0 % is first person, 100 % is the original game.
+-- Position is interpolated linearly, pitch / yaw / field of view with a smooth step, and the distance
+-- itself is eased, so every change - including F5, which jumps between 0 and 100 - is one continuous
+-- camera move. Once the camera is more than ZOOM_BODY_CM from the eye the character is shown again and
+-- the first-person-only parts (view model, pinned texts and prompts, kept ceilings) are switched off.
+--
+-- 100 % really is the original game: on the way there mouse look stops and the view yaw is eased back to
+-- the game camera's own yaw; when both have arrived the mod lets go completely (S.on = false: fixed
+-- camera, free cursor, the game's own controls). Any zoom below 100 takes over again, starting from the
+-- game's camera, so there is no jump in either direction.
+local ZOOM_MAX, ZOOM_RATE, ZOOM_BODY_CM = 100.0, 70.0, 70.0     -- %, % per second, cm
+local ZOOM_AIM_AHEAD = 1200.0                                   -- cm in front of the character where the hidden cursor aims
+
+local function zoomInput(pc, dt)
+    local dir = 0
+    if keyDown(pc, "Hyphen") then dir = 1 end                       -- "-": further away
+    if keyDown(pc, "Equals") or keyDown(pc, "Add") then dir = dir - 1 end   -- "+" (main row or numpad): closer
+    if dir ~= 0 then
+        S.cfg.zoom = clamp(S.cfg.zoom + dir * ZOOM_RATE * dt, 0.0, ZOOM_MAX)
+        S.zoomDirty = true
+    elseif S.zoomDirty then
+        S.zoomDirty = false
+        if S.cfg.zoom < 4.0 then S.cfg.zoom = 0.0            -- settle in first person / the original view when almost there
+        elseif S.cfg.zoom > 96.0 then S.cfg.zoom = 100.0
+        else S.cfg.zoom = math.floor(S.cfg.zoom + 0.5) end
+        saveCfg()
+    end
+end
+
+-- Returns the camera pose for this frame and how far it is from the eye.
+-- (ex,ey,ez) = first-person eye, g* = the game's own camera read from the cache before we overwrite it.
+local function zoomCamera(dt, ex, ey, ez, fpPitch, gx, gy, gz, gPitch, gYaw, gFov)
+    local target = S.cfg.zoom / 100.0
+    local z = S.zoomCur or target
+    z = z + (target - z) * math.min(1.0, dt * 6.0)
+    if math.abs(target - z) < 0.0005 then z = target end
+    S.zoomCur = z
+    if z <= 0.0 then return ex, ey, ez, fpPitch, S.yaw, S.cfg.fov, 0.0 end
+    local t = clamp(z, 0.0, 1.0); t = t * t * (3.0 - 2.0 * t)
+    local dx, dy, dz = gx - ex, gy - ey, gz - ez
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz) * z
+    return ex + dx * z, ey + dy * z, ez + dz * z,
+        fpPitch + (gPitch - fpPitch) * t, wrap(S.yaw + wrap(gYaw - S.yaw) * t), S.cfg.fov + (gFov - S.cfg.fov) * t, dist
+end
+
+-- Where on screen a point ZOOM_AIM_AHEAD in front of the character is: the hidden cursor is parked there
+-- (the game aims at the world point under the cursor) and the crosshair is drawn there. In first person
+-- that is the screen centre; the two are blended over the first two metres of camera distance.
+local function zoomAimPoint(pawnLoc, cxw, cyw, czw, pitch, yaw, fov, dist)
+    if S.cx == nil then return end
+    local px, py = S.cx, S.cy
+    if dist > 1.0 then
+        local ry, rp = math.rad(yaw), math.rad(pitch)
+        local cy, sy, cp, sp = math.cos(ry), math.sin(ry), math.cos(rp), math.sin(rp)
+        local ay = math.rad(S.yaw)
+        local ax, ayy, az = pawnLoc.X + math.cos(ay) * ZOOM_AIM_AHEAD - cxw, pawnLoc.Y + math.sin(ay) * ZOOM_AIM_AHEAD - cyw, pawnLoc.Z - czw
+        local depth = ax * cp * cy + ayy * cp * sy + az * sp
+        if depth > 1.0 then
+            local tn = math.tan(math.rad(fov) / 2.0)
+            local u = 0.5 + (-ax * sy + ayy * cy) / (depth * tn) / 2.0
+            local v = 0.5 - (-ax * sp * cy - ayy * sp * sy + az * cp) / (depth * tn * S.cy / S.cx) / 2.0
+            local k = clamp(dist / 200.0, 0.0, 1.0)
+            px = S.cx + (clamp(u, 0.08, 0.92) * 2 * S.cx - S.cx) * k
+            py = S.cy + (clamp(v, 0.08, 0.92) * 2 * S.cy - S.cy) * k
+        end
+    end
+    S.aimPX, S.aimPY = math.floor(px + 0.5), math.floor(py + 0.5)
+    -- move the crosshair widget with it (canvas units = pixels / UI scale)
+    if valid(S.xhair) and S.uiScale and S.uiScale > 0 then
+        local tx, ty = (S.aimPX - S.cx) / S.uiScale, (S.aimPY - S.cy) / S.uiScale
+        if S.xhairTX ~= tx or S.xhairTY ~= ty then S.xhairTX, S.xhairTY = tx, ty; S.xhair:SetRenderTranslation({ X = tx, Y = ty }) end
+    end
+end
+
 -- ---------------------------------------------------------------- head bob
 -- Without it the eye glides: the camera sits on the capsule, not on the (hidden, un-animated) head.
 -- The phase advances with the distance walked, so the rhythm follows the speed; the amount eases in and
@@ -868,8 +1034,9 @@ function A.worldReset(reason)
     S.menu = nil; S.menuShown = nil; S.menuFails = 0
     S.fadesOff = false; S.laserVC = nil
     S.radar = nil; S.radarFails = 0; S.radarBgAddr = nil; S.radarOn = false; S.radarBgT = -1
-    S.bars = nil; S.texts = nil; S.vmW = nil; S.prompts = nil; S.promptT = -1; S.ownPrompt = nil; S.ownPromptFails = 0
+    S.bars = nil; S.barSeen = nil; S.texts = nil; S.vmW = nil; S.prompts = nil; S.promptT = -1; S.ownPrompt = nil; S.ownPromptFails = 0
     S.active = false; S.look = nil; S.lastMX = nil
+    S.third = false; S.zoomCur = nil; S.aimPX = nil; S.aimPY = nil; S.xhairTX = nil; S.xhairTY = nil
 end
 
 local function setupPawn(pawn)
@@ -880,7 +1047,7 @@ local function setupPawn(pawn)
     if not valid(S.lib) then S.lib = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary") end
     if not valid(S.ksl) then S.ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary") end
     if not valid(S.gs) then S.gs = StaticFindObject("/Script/Engine.Default__GameplayStatics") end
-    S.keys = nil; S.keyState = nil; S.eyeH = nil
+    S.keys = nil; S.keyState = nil; S.eyeH = nil; S.third = nil; S.zoomCur = nil
     S.lastMX = nil; S.slowT = -1; S.hideT = -1; S.coopT = -1; S.active = false; S.look = nil; S.vtAddr = nil; S.vmW = nil; S.barT = -1
     pcall(function() pawn.PrimaryActorTick.TickGroup = TG_POST_UPDATE_WORK end)
     -- start out looking where the character faces
@@ -938,6 +1105,10 @@ function A.tick(Context, Delta)
     S.step = "key"
     if keyPressed(pc, "F5", false) then A.toggle() end
     if keyPressed(pc, "F6", false) then S.menuOpen = not S.menuOpen end
+    if not S.ui then zoomInput(pc, dt) end
+    if not S.on and S.cfg.zoom < 100.0 then       -- leaving the original view: start from the game's own camera
+        S.on = true; S.zoomCur = 1.0; S.fromGame = true
+    end
     if S.menuOpen and not S.ui then S.step = "menu"; menuInput(pc) end
     showMenu(S.menuOpen == true and not S.ui)
 
@@ -957,6 +1128,7 @@ function A.tick(Context, Delta)
         S.ui = uiOpen(pc)
         local sz = {}; pc:GetViewportSize(sz, {})
         if type(sz.SizeX) == "number" and sz.SizeX > 0 then S.cx, S.cy = sz.SizeX // 2, sz.SizeY // 2 end
+        if valid(S.lib) then local sc = S.lib:GetViewportScale(pc); if type(sc) == "number" and sc > 0 then S.uiScale = sc end end
     end
     if S.wall - (S.coopT or -1) > 2.0 and valid(S.ksl) and valid(S.gs) then
         S.coopT = S.wall
@@ -970,7 +1142,13 @@ function A.tick(Context, Delta)
     local active = (S.on and S.vtCoop and not S.coop and valid(S.ksl) and valid(S.gs)) == true
     if active ~= S.active then
         S.active = active; S.look = nil
-        if active then S.hideT = -1 else
+        if active then
+            S.hideT = -1
+            if S.fromGame then
+                S.fromGame = false
+                S.yaw = vt:GetCameraRotation().Yaw; S.pitch = 0.0
+            end
+        else
             hideBody(pawn, false); releaseWeapon(); updateBars(0, 0, 0, true); updatePrompts(pawn, true); updateRadar(pawn, false); updateGroupFades(false); restoreCameraActor(); showCrosshair(false)
             pc.CurrentMouseCursor = 1
         end
@@ -980,11 +1158,12 @@ function A.tick(Context, Delta)
 
     S.step = "hide"
     -- keep our own body hidden; the game un-hides it after some events
-    if S.wall - (S.hideT or -1) > 0.25 then S.hideT = S.wall; hideBody(pawn, true) end
+    if S.wall - (S.hideT or -1) > 0.25 then S.hideT = S.wall; hideBody(pawn, not S.third) end
 
     S.step = "look"
     -- look: only while the game window is focused (GetMousePosition fails otherwise) and no UI is open
-    local look = (not S.ui) and valid(S.lib) and S.cx ~= nil and pc:GetMousePosition({}, {}) == true
+    local toGame = S.cfg.zoom >= 100.0           -- on the way to the original view: hands off the mouse already
+    local look = (not S.ui) and (not toGame) and valid(S.lib) and S.cx ~= nil and pc:GetMousePosition({}, {}) == true
     if look ~= S.look then
         S.look = look; S.lastMX = nil; showCrosshair(look)
         if not look then pc.CurrentMouseCursor = 1 end       -- EMouseCursor::Default: hand the pointer back
@@ -999,7 +1178,7 @@ function A.tick(Context, Delta)
             S.yaw = wrap(S.yaw + (m.X - S.lastMX) * S.cfg.sens)
             S.pitch = clamp(S.pitch - (m.Y - S.lastMY) * S.cfg.sens, -MAX_PITCH, MAX_PITCH)
         end
-        pc:SetMouseLocation(S.cx, S.cy)
+        pc:SetMouseLocation(S.aimPX or S.cx, S.aimPY or S.cy)     -- screen centre in first person, see zoomAimPoint
         local r = S.lib:GetMousePositionOnPlatform()   -- the reference is re-read after the warp, never assumed
         S.lastMX, S.lastMY = r.X, r.Y
     end
@@ -1010,6 +1189,17 @@ function A.tick(Context, Delta)
     if S.vtYaw0 == nil then S.vtYaw0 = ar.Yaw end
     local d = wrap(S.yaw - vt:GetCameraRotation().Yaw)
     if d > 0.01 or d < -0.01 then vt:K2_SetActorRotation({ Pitch = ar.Pitch, Yaw = wrap(ar.Yaw + d), Roll = ar.Roll }, false) end
+    if toGame then
+        -- ease the view yaw back to where the game's camera would look with its actor un-rotated
+        local home = wrap(vt:GetCameraRotation().Yaw - (vt:K2_GetActorRotation().Yaw - S.vtYaw0))
+        local off = wrap(home - S.yaw)
+        S.yaw = wrap(S.yaw + off * math.min(1.0, dt * 6.0))
+        if (S.zoomCur or 0.0) >= 0.999 and math.abs(off) < 0.3 then
+            S.on = false                            -- arrived: next tick the mod lets go (see "activate")
+            log("original view")
+            return
+        end
+    end
 
     S.step = "view"
     -- the view itself
@@ -1044,19 +1234,31 @@ function A.tick(Context, Delta)
         ex, ey, ez = ex + rx * bobSide, ey + ryy * bobSide, ez + bobUp
     end
     local pov = cam.CameraCachePrivate.POV
+    S.step = "recoil"
+    local kick = recoilStep(pawn, dt)
+    S.step = "zoom"
+    -- the camera: first-person eye, the game's own camera (still in the cache at this point), or in between
+    local gl, gr = pov.Location, pov.Rotation
+    local camX, camY, camZ, camPitch, camYaw, camFov, camDist =
+        zoomCamera(dt, ex, ey, ez, S.pitch + kick * 0.8, gl.X, gl.Y, gl.Z, gr.Pitch, gr.Yaw, pov.FOV)
+    S.camYaw, S.camPitch = camYaw, camPitch
+    local third = camDist > ZOOM_BODY_CM
+    if third ~= S.third then
+        S.third = third
+        hideBody(pawn, not third); S.hideT = S.wall
+        if third then releaseWeapon(); S.texts = {} end
+    end
+    zoomAimPoint(loc, camX, camY, camZ, camPitch, camYaw, camFov, camDist)
     S.step = "laser"
     trackLaser(pawn)
     S.step = "roofs"
-    updateGroupFades(S.cfg.roofs ~= 0)
+    updateGroupFades(S.cfg.roofs ~= 0 and not third)
     S.step = "radar"
     updateRadar(pawn, true)
     S.step = "view"
-    pov.Location.X = ex; pov.Location.Y = ey; pov.Location.Z = ez
-    S.step = "recoil"
-    local kick = recoilStep(pawn, dt)
-    S.step = "view"
-    pov.Rotation.Pitch = S.pitch + kick * 0.8; pov.Rotation.Yaw = S.yaw; pov.Rotation.Roll = 0.0
-    pov.FOV = S.cfg.fov
+    pov.Location.X = camX; pov.Location.Y = camY; pov.Location.Z = camZ
+    pov.Rotation.Pitch = camPitch; pov.Rotation.Yaw = camYaw; pov.Rotation.Roll = 0.0
+    pov.FOV = camFov
     if S.cfg.bloom >= 0 then        -- effects sit right in front of the lens now; the top-down bloom whites the screen out
         local pp = pov.PostProcessSettings
         pp.bOverride_BloomIntensity = true; pp.BloomIntensity = S.cfg.bloom / 100.0
@@ -1064,21 +1266,26 @@ function A.tick(Context, Delta)
         pov.PostProcessBlendWeight = 1.0
     end
 
-    S.step = "weapon"
-    pinWeapon(pawn, wx, wy, wz)
-    S.step = "texts"
-    updateTexts(ex, ey, ez)
+    if not third then
+        S.step = "weapon"
+        pinWeapon(pawn, wx, wy, wz)
+        S.step = "texts"
+        updateTexts(ex, ey, ez)
+    end
     S.step = "prompts"
-    updatePrompts(pawn, false)
-    if S.wall - (S.barT or -1) > 0.05 then S.step = "bars"; S.barT = S.wall; updateBars(ex, ey, ez, false) end
+    updatePrompts(pawn, third)          -- from a distance the game's own placement of prompts is right again
+    if S.wall - (S.barT or -1) > 0.05 then S.step = "bars"; S.barT = S.wall; updateBars(camX, camY, camZ, false) end
     S.step = "done"
 end
 
 
+-- F5: first person <-> original view. From anywhere in between it goes to first person.
+-- Only the target changes here; the camera travels there (see "camera distance").
 function A.toggle()
-    S.on = not S.on
-    log("first person = " .. tostring(S.on))
-    return S.on
+    if S.cfg.zoom <= 0.0 then S.cfg.zoom = 100.0 else S.cfg.zoom = 0.0 end
+    saveCfg()
+    log("F5 -> " .. ((S.cfg.zoom <= 0.0) and "first person" or "original view"))
+    return S.cfg.zoom <= 0.0
 end
 
 function A.command(p)
