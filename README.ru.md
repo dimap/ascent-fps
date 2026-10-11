@@ -81,6 +81,9 @@
 
 ## Установка
 
+**Скачивайте мод со страницы [релизов](https://github.com/dimap/ascent-fps/releases/latest)**, а не из самого
+репозитория: в репозитории лежит версия в разработке.
+
 1. Установите RE-UE4SS v3.0.1 в `The Ascent\TheAscent\Binaries\Win64\`
    (файлы `dwmapi.dll`, `UE4SS.dll`, `UE4SS-settings.ini` и папка `Mods` должны лежать рядом с
    `TheAscent-Win64-Shipping.exe`).
@@ -95,7 +98,9 @@
    BPModLoaderMod : 0
    BPML_GenericFunctions : 0
    ```
-4. Скопируйте папку `AscentFPS` из этого репозитория в `Binaries\Win64\Mods\`.
+4. Скачайте **AscentFPS-x.xx.zip** из [последнего релиза](https://github.com/dimap/ascent-fps/releases/latest)
+   (в блоке *Assets* — не через зелёную кнопку *Code*) и распакуйте в `Binaries\Win64\Mods\`, чтобы получилась
+   папка `Mods\AscentFPS\`.
    В ней лежит `enabled.txt`, поэтому запись в `mods.txt` не нужна.
 5. Запустите игру и загрузите одиночное сохранение. Вид от первого лица включён по умолчанию.
 

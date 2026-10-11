@@ -88,6 +88,9 @@ free mouse cursor automatically. Alt-tabbing releases the cursor as well.
 
 ## Installation
 
+**Download the mod from the [Releases](https://github.com/dimap/ascent-fps/releases/latest) page**, not from the
+repository itself: the repository holds the version in development.
+
 1. Install RE-UE4SS v3.0.1 into `The Ascent\TheAscent\Binaries\Win64\`
    (so that `dwmapi.dll`, `UE4SS.dll`, `UE4SS-settings.ini` and the `Mods` folder sit next to
    `TheAscent-Win64-Shipping.exe`).
@@ -102,7 +105,9 @@ free mouse cursor automatically. Alt-tabbing releases the cursor as well.
    BPModLoaderMod : 0
    BPML_GenericFunctions : 0
    ```
-4. Copy the `AscentFPS` folder from this repository into `Binaries\Win64\Mods\`.
+4. Download **AscentFPS-x.xx.zip** from the [latest release](https://github.com/dimap/ascent-fps/releases/latest)
+   (under *Assets* — not the green *Code* button) and unpack it into `Binaries\Win64\Mods\`, so that you get
+   `Mods\AscentFPS\`.
    It contains `enabled.txt`, so it loads without an entry in `mods.txt`.
 5. Start the game and load a single-player save. First person is on by default.
 
