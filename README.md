@@ -105,8 +105,7 @@ repository itself: the repository holds the version in development.
    BPModLoaderMod : 0
    BPML_GenericFunctions : 0
    ```
-4. Download **AscentFPS-x.xx.zip** from the [latest release](https://github.com/dimap/ascent-fps/releases/latest)
-   (under *Assets* — not the green *Code* button) and unpack it into `Binaries\Win64\Mods\`, so that you get
+4. Download **AscentFPS-x.xx.zip** from the [latest release](https://github.com/dimap/ascent-fps/releases/latest) and unpack it into `Binaries\Win64\Mods\`, so that you get
    `Mods\AscentFPS\`.
    It contains `enabled.txt`, so it loads without an entry in `mods.txt`.
 5. Start the game and load a single-player save. First person is on by default.
