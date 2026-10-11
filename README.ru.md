@@ -98,8 +98,7 @@
    BPModLoaderMod : 0
    BPML_GenericFunctions : 0
    ```
-4. Скачайте **AscentFPS-x.xx.zip** из [последнего релиза](https://github.com/dimap/ascent-fps/releases/latest)
-   (в блоке *Assets* — не через зелёную кнопку *Code*) и распакуйте в `Binaries\Win64\Mods\`, чтобы получилась
+4. Скачайте **AscentFPS-x.xx.zip** из [последнего релиза](https://github.com/dimap/ascent-fps/releases/latest) и распакуйте в `Binaries\Win64\Mods\`, чтобы получилась
    папка `Mods\AscentFPS\`.
    В ней лежит `enabled.txt`, поэтому запись в `mods.txt` не нужна.
 5. Запустите игру и загрузите одиночное сохранение. Вид от первого лица включён по умолчанию.
